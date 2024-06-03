@@ -66,8 +66,10 @@ impl ConnParsable for QuicParser {
                 }
             } else {
                 // Potential Short Header
-
+                ProbeResult::Unsure
                 // Check if the connection ID is known
+                /*
+                Removed for performance reasons
                 let mut max_dcid_len = 20;
                 if data.len() < 1 + max_dcid_len {
                     max_dcid_len = data.len() - 1;
@@ -77,6 +79,7 @@ impl ConnParsable for QuicParser {
                     Some(_) => ProbeResult::Certain,
                     None => ProbeResult::NotForUs,
                 }
+                */
             }
         } else {
             log::warn!("Malformed packet");
@@ -197,15 +200,15 @@ impl Quic {
             if data.len() < (dcid_start + dcid_len as usize + 2) as usize {
                 return Err(QuicError::PacketTooShort);
             }
-            let dcid_bytes = data[dcid_start..dcid_start + dcid_len as usize].to_vec();
-            let dcid = Quic::vec_u8_to_hex_string(&dcid_bytes);
+            let dcid_bytes = &data[dcid_start..dcid_start + dcid_len as usize];
+            let dcid = Quic::vec_u8_to_hex_string(dcid_bytes);
             let scid_len = data[dcid_start + dcid_len as usize];
             let scid_start = dcid_start + dcid_len as usize + 1;
             if data.len() < (scid_start + scid_len as usize + 1) {
                 return Err(QuicError::PacketTooShort);
             }
-            let scid_bytes = data[scid_start..scid_start + scid_len as usize].to_vec();
-            let scid = Quic::vec_u8_to_hex_string(&scid_bytes);
+            let scid_bytes = &data[scid_start..scid_start + scid_len as usize];
+            let scid = Quic::vec_u8_to_hex_string(scid_bytes);
 
             // Counts all bytes remaining
             let payload_bytes_count = data.len() - scid_start - scid_len as usize;
@@ -245,10 +248,11 @@ impl Quic {
 
 impl QuicParser {
     fn check_connection_id(&self, dcid_bytes: &[u8]) -> Option<String> {
+        let dcid_hex = Quic::vec_u8_to_hex_string(dcid_bytes);
         for dcid_len in (1..dcid_bytes.len() + 1).rev() {
-            let dcid = Quic::vec_u8_to_hex_string(&dcid_bytes[..dcid_len]);
-            if self.connection_ids.contains(&dcid) {
-                return Some(dcid);
+            let dcid = &dcid_hex[..dcid_len * 2];
+            if self.connection_ids.contains(dcid) {
+                return Some(String::from(dcid));
             }
         }
         None
