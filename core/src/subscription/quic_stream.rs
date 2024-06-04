@@ -24,6 +24,7 @@ use crate::memory::mbuf::Mbuf;
 use crate::protocols::stream::quic::{parser::QuicParser, Quic};
 use crate::protocols::stream::{ConnParser, Session, SessionData};
 use crate::subscription::{Level, Subscribable, Subscription, Trackable};
+use std::collections::HashSet;
 
 use serde::Serialize;
 
@@ -91,27 +92,65 @@ impl Subscribable for QuicStream {
 #[doc(hidden)]
 pub struct TrackedQuic {
     five_tuple: FiveTuple,
+    connection_id: HashSet<String>,
+}
+
+impl TrackedQuic {
+    fn get_connection_id(&self, dcid_bytes: &[u8]) -> Option<String> {
+        let dcid_hex = Quic::vec_u8_to_hex_string(dcid_bytes);
+        for dcid in &self.connection_id {
+            if dcid_hex.starts_with(dcid) {
+                return Some(dcid.clone());
+            }
+        }
+        None
+    }
 }
 
 impl Trackable for TrackedQuic {
     type Subscribed = QuicStream;
 
     fn new(five_tuple: FiveTuple) -> Self {
-        TrackedQuic { five_tuple }
+        TrackedQuic {
+            five_tuple,
+            connection_id: HashSet::new(),
+        }
     }
 
     fn pre_match(&mut self, _pdu: L4Pdu, _session_id: Option<usize>) {}
 
     fn on_match(&mut self, session: Session, subscription: &Subscription<Self::Subscribed>) {
         if let SessionData::Quic(quic) = session.data {
+            let mut quic_clone = (*quic).clone();
+
+            if let Some(long_header) = &quic_clone.long_header {
+                if long_header.dcid_len > 0 {
+                    self.connection_id.insert(long_header.dcid.clone());
+                }
+                if long_header.scid_len > 0 {
+                    self.connection_id.insert(long_header.scid.clone());
+                }
+            } else {
+                if let Some(ref mut short_header_value) = quic_clone.short_header {
+                    short_header_value.dcid =
+                        self.get_connection_id(&short_header_value.dcid_bytes);
+                }
+                return subscription.invoke(QuicStream {
+                    five_tuple: self.five_tuple,
+                    data: quic_clone,
+                });
+            }
+
             subscription.invoke(QuicStream {
                 five_tuple: self.five_tuple,
-                data: *quic,
+                data: quic_clone,
             });
         }
     }
 
     fn post_match(&mut self, _pdu: L4Pdu, _subscription: &Subscription<Self::Subscribed>) {}
 
-    fn on_terminate(&mut self, _subscription: &Subscription<Self::Subscribed>) {}
+    fn on_terminate(&mut self, _subscription: &Subscription<Self::Subscribed>) {
+        self.connection_id.clear();
+    }
 }

@@ -24,10 +24,10 @@ pub(crate) mod parser;
 
 pub use self::header::{QuicLongHeader, QuicShortHeader};
 use serde::Serialize;
-mod header;
+pub(crate) mod header;
 
 /// Parsed Quic Packet contents
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Quic {
     /// Quic Short header
     pub short_header: Option<QuicShortHeader>,
